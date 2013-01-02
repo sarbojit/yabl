@@ -1,0 +1,59 @@
+YaBL - Yet Another Bootloader
+
+This file will contain the "running-notes" regarding the project.
+
+Development Environment:
+64-bit GNU/Linux host
+
+Target platform: Beaglebone [AM3359 Cortex-A8 armv7a processor]
+
+Beaglebone initialization: 
+
+(Based on AM335x ARM Cortex-A8 MPU TRM by Texas Instruments)
+
+There is already a ROM code burnt inside the board which takes care of basic 
+initialization of the system. Beaglebone is hard-wired to boot in the following 
+order:
+mmc0 -> spi0 -> uart0 -> usb0 
+
+The idea is to write a bootloader from scratch and boot off the board and transfer 
+control to Linux kernel.
+
+Upon reset, the ROM code executes and brings up the MMC/SD controller and looks for 
+a card. If found (exeption will trigger a dead loop), the ROM code will look for a 
+FAT partition which it will try to read. The image file which is used for the 
+booting process has to be named 'MLO' for _this_ is the name which will be looked 
+up by the ROM code.
+This file has to be located on the root directory of an active primary partition.
+The sector read procedure utilizes standard MMC/SD raw data read procedure.
+
+The format of the boot image is as follows:
+For non-XIP Memory booting
+|--------------------------|
+|    GP image header	   |
+----------------------------
+|			   |
+|    Initial Sofware	   |
+|			   |
+----------------------------
+The GP header is not required for peripherial or XIP booting.
+
+The GP header contains information on image size and the destination address.
+
+For now, we will use the mkimage tool provided by u-boot to create the image header 
+and add it to our boot image.
+
+Sample from creation of MLO during building of u-boot:
+
+u-boot/tools/mkimage -T omapimage \
+		-a 0x402F0400 -d u-boot/spl/u-boot-spl.bin u-boot/MLO
+Section CHSETTINGS offset 40 length c
+CHSETTINGS (c0c0c0c1) valid:0 version:1 reserved:0 flags:0
+GP Header: Size 12a86 LoadAddr 402f0400
+
+As we can see here that the load address is supplied and the image-type is 
+"omapimage". This command adds a GP header to the binary and creates the final 
+boot image.
+
+Since TI's ROM code will expect this header present in case of non-XIP 
+in memory booting, we must add this header to our boot image.
