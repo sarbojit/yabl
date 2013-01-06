@@ -1,0 +1,164 @@
+With U-Boot, "normal" build targets like "zImage" or "bzImage" are
+not used. If you use recent kernel source, a new build target
+"uImage" will exist which automatically builds an image usable by
+U-Boot. 
+
+The "uImage" build target uses a special tool (in 'tools/mkimage') to
+encapsulate a compressed Linux kernel image with header  information,
+CRC32 checksum etc. for use with U-Boot. 
+
+* build a standard "vmlinux" kernel image (in ELF binary format):
+
+* convert the kernel into a raw binary image:
+
+    ${CROSS_COMPILE}-objcopy -O binary \
+                 -R .note -R .comment \
+                 -S vmlinux linux.bin
+
+* compress the binary image:
+
+    gzip -9 linux.bin
+                                            
+* package compressed binary image for U-Boot:
+
+    mkimage -A ppc -O linux -T kernel -C gzip \
+        -a 0 -e 0 -n "Linux Kernel Image" \
+        -d linux.bin.gz uImage
+
+
+The "mkimage" tool can also be used to create ramdisk images for use
+with U-Boot, either separated from the Linux kernel image, or
+combined into one file. "mkimage" encapsulates the images with a 64
+byte header containing information about target architecture,
+operating system, image type, compression method, entry points, time
+stamp, CRC32 checksums, etc.
+
+"mkimage" can be called in two ways: to verify existing images and
+print the header information, or to build new images.
+
+In the first form (with "-l" option) mkimage lists the information
+contained in the header of an existing U-Boot image; this includes
+checksum verification:
+
+    tools/mkimage -l image
+      -l ==> list image header information
+
+The second form (with "-d" option) is used to build a U-Boot image
+from a "data file" which is used as image payload:
+
+    tools/mkimage -A arch -O os -T type -C comp -a addr -e ep \
+              -n name -d data_file image
+      -A ==> set architecture to 'arch'
+      -O ==> set operating system to 'os'
+      -T ==> set image type to 'type'
+      -C ==> set compression type 'comp'
+      -a ==> set load address to 'addr' (hex)
+      -e ==> set entry point to 'ep' (hex)
+      -n ==> set image name to 'name'
+      -d ==> use image data from 'datafile'
+
+
+Before reading this document, I recommend readers to go through the running-notes.txt
+once in order to sync up with this document(though astute readers can skip this part).
+
+From the prevoius document(running-notes.txt), beaglebone in based on AM335x ARM 
+Cortex-A8 MPU TRM by Texas Instruments processor.There is already a ROM code burnt
+inside the board which takes care of basic initialization of the system.
+This ROM code will expect the GP header present in case of non-XIP 
+in memory booting, so we have to add this header in our input binary image.
+
+The whole purpose of the document is to understand the mkimage working priciple in order to develop our
+own customized mkimage like tool which will just do our required job for beaglebone (AM335x).
+
+So, lets define our goal first.
+GOAL: Adding GP header to the input image so that RomBoot code can recognize the image.  
+
+So, lets start with the initial experiments. After spending much time with the code of u-boot/tools/mkimage.c
+I couldn't able to figure out "HOW THINGS WORK". So, I decided to build the u-boot source code and see the logs
+in various places of mkimage.c
+
+Checklist before we go ahead to the next step:
+
+1. u-boot souce code ( you can download it from u-boot official site)
+2. Cross compiler toolchain ; required because we are compiling the code for AM335x ARM 
+Cortex-A8. you can downlaod it from CodeSourcery or linaro sites)
+3. A linux box :-)
+
+
+steps to build u-boot:
+untar the u-boot source code then do
+$ cd u-boot 
+$ export PATH=$PATH:/home/babi/CodeSourcery/Sourcery_CodeBench_Lite_for_ARM_GNU_Linux/bin/
+
+$ make am335x_evm_config ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabi-
+$ make all ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabi-
+
+This will build the u-boot with mkimage.
+
+We can see the following line while building the u-boot
+
+~/u-boot/tools/mkimage -T omapimage \
+		-a 0x402F0400 -d ~/u-boot/spl/u-boot-spl.bin ~/u-boot/MLO
+
+
+What does this mkimage actually do?
+------------------------------------
+
+As I said, mkimage tool does nothing but adding a header to the input image.
+
+INPUT: 
+u-boot-spl.bin (size 75694 bytes)
+
+OUTPUT:
+
+MLO and MLO.byteswap (both have size 76214 bytes)
+
+
+So, mkimage adds exactly 520 bytes header to the input binary image. That's all.
+
+This 520 bytes consist of 512 bytes CH header and 8 bytes of GP header.
+
+
+Here is the first 520 bytes the MLO output image. I used hexdump utility(http://www.fileformat.info/tool/hexdump.htm) to 
+get the byte-by-byte actual content of the image.
+
+
+file name: MLO
+mime type: 
+
+0000-0010:  40 00 00 00-0c 00 00 00-00 00 00 00-00 00 00 00  @....... ........
+0000-0020:  00 00 00 00-43 48 53 45-54 54 49 4e-47 53 00 00  ....CHSE TTINGS..
+0000-0030:  ff ff ff ff-ff ff ff ff-ff ff ff ff-ff ff ff ff  ........ ........
+0000-0040:  ff ff ff ff-ff ff ff ff-ff ff ff ff-ff ff ff ff  ........ ........
+0000-0050:  c1 c0 c0 c0-00 01 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0060:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0070:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0080:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0090:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-00a0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-00b0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-00c0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-00d0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-00e0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-00f0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0100:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0110:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0120:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0130:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0140:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0150:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0160:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0170:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0180:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0190:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-01a0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-01b0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-01c0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-01d0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-01e0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-01f0:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0200:  00 00 00 00-00 00 00 00-00 00 00 00-00 00 00 00  ........ ........
+0000-0208:  ae 27 01 00-00 04 2f 40                          .'..../@
+
+
+
